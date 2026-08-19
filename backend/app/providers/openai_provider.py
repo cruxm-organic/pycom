@@ -29,3 +29,19 @@ class OpenAIProvider(AIProvider):
             return json.loads(response.choices[0].message.content)
         except Exception as exc:  # noqa: BLE001
             raise AIProviderError(f"OpenAI generation failed: {exc}") from exc
+
+    def chat(self, system_instruction: str, history: list[dict[str, str]]) -> str:
+        try:
+            messages = [{"role": "system", "content": system_instruction}]
+            messages += [
+                {"role": "assistant" if m["role"] == "model" else "user", "content": m["text"]}
+                for m in history
+            ]
+            response = self._client.chat.completions.create(
+                model=self._model,
+                temperature=0.6,
+                messages=messages,
+            )
+            return response.choices[0].message.content or ""
+        except Exception as exc:  # noqa: BLE001
+            raise AIProviderError(f"OpenAI chat failed: {exc}") from exc

@@ -1,7 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI } from '@google/genai';
 import { XMarkIcon, PaperAirplaneIcon, SparklesIcon } from '../Icons.tsx';
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
 
 const InvestorChatbot: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
@@ -26,35 +27,24 @@ const InvestorChatbot: React.FC = () => {
         setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
         setIsLoading(true);
 
-        if (!process.env.API_KEY) {
-             setTimeout(() => {
-                setMessages(prev => [...prev, { role: 'model', text: "I am currently in demo mode (API Key missing). In production, I would provide detailed financial projections and user growth data." }]);
-                setIsLoading(false);
-             }, 1000);
-             return;
-        }
-
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            
-            const result = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: messages.map(m => ({ role: m.role, parts: [{ text: m.text }] })).concat([{ role: 'user', parts: [{ text: userMsg }] }]),
-                config: {
-                    systemInstruction: `You are the Investor Relations Officer for PyCom, an AI-powered EdTech platform.
-                    
-                    KEY FACTS:
-                    - Mission: Democratize Python & AI education.
-                    - Traction: 10k+ Monthly Active Users, 500k+ code executions.
-                    - Revenue Model: Freemium (Courses, Advanced AI Tools), B2B Licensing, Recruitment referrals.
-                    - Funding Goal: $2M Seed Round for infrastructure scaling and model fine-tuning.
-                    
-                    TONE: Professional, data-driven, yet visionary and confident. Keep answers concise.`
-                }
+            const history = messages.concat([{ role: 'user', text: userMsg }]);
+            const response = await fetch(`${API_BASE}/api/investor-chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ history }),
             });
-            
-            const responseText = result.text || "No response generated.";
-            setMessages(prev => [...prev, { role: 'model', text: responseText }]);
+
+            if (response.status === 429) {
+                setMessages(prev => [...prev, { role: 'model', text: "I'm getting a lot of questions right now, give me a moment and try again." }]);
+                return;
+            }
+            if (!response.ok) {
+                throw new Error(`Backend returned ${response.status}`);
+            }
+
+            const data = await response.json();
+            setMessages(prev => [...prev, { role: 'model', text: data.text || "No response generated." }]);
         } catch (error) {
             console.error(error);
             setMessages(prev => [...prev, { role: 'model', text: "I'm having trouble accessing the latest data. Please try again later." }]);

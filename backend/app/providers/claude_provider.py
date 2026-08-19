@@ -33,3 +33,20 @@ class ClaudeProvider(AIProvider):
             return json.loads(text)
         except Exception as exc:  # noqa: BLE001
             raise AIProviderError(f"Claude generation failed: {exc}") from exc
+
+    def chat(self, system_instruction: str, history: list[dict[str, str]]) -> str:
+        try:
+            messages = [
+                {"role": "assistant" if m["role"] == "model" else "user", "content": m["text"]}
+                for m in history
+            ]
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=1024,
+                temperature=0.6,
+                system=system_instruction,
+                messages=messages,
+            )
+            return response.content[0].text if response.content else ""
+        except Exception as exc:  # noqa: BLE001
+            raise AIProviderError(f"Claude chat failed: {exc}") from exc

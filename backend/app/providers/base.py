@@ -15,6 +15,12 @@ class AIProvider(ABC):
         """Generate JSON matching `schema` from `prompt`. Raises AIProviderError on failure."""
         raise NotImplementedError
 
+    @abstractmethod
+    def chat(self, system_instruction: str, history: list[dict[str, str]]) -> str:
+        """Generate a chat reply given a system instruction and a role/text history.
+        Raises AIProviderError on failure."""
+        raise NotImplementedError
+
 
 class AIProviderError(Exception):
     """Raised when a provider fails to produce a valid structured response."""

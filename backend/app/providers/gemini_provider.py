@@ -29,3 +29,15 @@ class GeminiProvider(AIProvider):
             return json.loads(response.text.strip())
         except Exception as exc:  # noqa: BLE001 - normalize every provider failure the same way
             raise AIProviderError(f"Gemini generation failed: {exc}") from exc
+
+    def chat(self, system_instruction: str, history: list[dict[str, str]]) -> str:
+        try:
+            contents = [{"role": m["role"], "parts": [{"text": m["text"]}]} for m in history]
+            response = self._client.models.generate_content(
+                model=self._model,
+                contents=contents,
+                config={"system_instruction": system_instruction, "temperature": 0.6},
+            )
+            return response.text or ""
+        except Exception as exc:  # noqa: BLE001
+            raise AIProviderError(f"Gemini chat failed: {exc}") from exc
