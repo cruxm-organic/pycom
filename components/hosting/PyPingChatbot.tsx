@@ -1,7 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI } from '@google/genai';
 import { XMarkIcon, PaperAirplaneIcon, TerminalIcon } from '../Icons.tsx';
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
 
 const PyPingChatbot: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
@@ -26,40 +27,24 @@ const PyPingChatbot: React.FC = () => {
         setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
         setIsLoading(true);
 
-        if (!process.env.API_KEY) {
-             setTimeout(() => {
-                setMessages(prev => [...prev, { role: 'model', text: "Error: API Key missing. Unable to access neural core for automation processing." }]);
-                setIsLoading(false);
-             }, 1000);
-             return;
-        }
-
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            
-            const result = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: messages.map(m => ({ role: m.role, parts: [{ text: m.text }] })).concat([{ role: 'user', parts: [{ text: userMsg }] }]),
-                config: {
-                    systemInstruction: `You are PyPing, an advanced AI DevOps Engineer for the PyCom Cloud Platform.
-                    
-                    YOUR CAPABILITIES:
-                    - Server Management (Linux/Ubuntu, Nginx, Systemd)
-                    - Containerization (Docker, Kubernetes)
-                    - Python Deployment (Gunicorn, Uvicorn, Supervisor)
-                    - Security (Firewalls, SSL, SSH Hardening)
-                    
-                    CONTEXT:
-                    - The user is the SOLE OWNER and ROOT ADMIN of this infrastructure.
-                    - You have full permission to generate deletion scripts or destructive commands if requested (with a warning).
-                    - Provide concrete terminal commands and configuration snippets.
-                    
-                    TONE: Technical, precise, slightly robotic but helpful. Like a futuristic terminal interface.`
-                }
+            const history = messages.concat([{ role: 'user', text: userMsg }]);
+            const response = await fetch(`${API_BASE}/api/pyping-chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ history }),
             });
-            
-            const responseText = result.text || "Command processing failed.";
-            setMessages(prev => [...prev, { role: 'model', text: responseText }]);
+
+            if (response.status === 429) {
+                setMessages(prev => [...prev, { role: 'model', text: "Rate limit reached. Standby and retry shortly." }]);
+                return;
+            }
+            if (!response.ok) {
+                throw new Error(`Backend returned ${response.status}`);
+            }
+
+            const data = await response.json();
+            setMessages(prev => [...prev, { role: 'model', text: data.text || "Command processing failed." }]);
         } catch (error) {
             console.error(error);
             setMessages(prev => [...prev, { role: 'model', text: "Connection to PyPing Core failed. Please retry." }]);
