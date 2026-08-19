@@ -35,6 +35,11 @@ _chat_limiter = RateLimiter(max_requests=8, window_seconds=60)
 # Image generation/editing is the most expensive call in the app by far, tightest budget.
 _image_limiter = RateLimiter(max_requests=5, window_seconds=60)
 
+# Video generation is even more expensive and slower (minutes per job), tightest budget of all.
+_video_limiter = RateLimiter(max_requests=3, window_seconds=300)
+# Status polling is cheap and frequent by design, generous budget so the UI can poll smoothly.
+_video_status_limiter = RateLimiter(max_requests=30, window_seconds=60)
+
 DILEMMA_SCHEMA = {
     "type": "object",
     "properties": {
@@ -241,6 +246,20 @@ class GroundedSearchRequest(BaseModel):
     search_type: str  # 'web' or 'maps'
     lat: float | None = None
     lng: float | None = None
+
+
+ALLOWED_VIDEO_ASPECT_RATIOS = {"16:9", "9:16"}
+
+
+class VideoGenerateRequest(BaseModel):
+    prompt: str = Field(max_length=MAX_IMAGE_PROMPT_LEN)
+    aspect_ratio: str = "16:9"
+    image_base64: str | None = Field(default=None, max_length=MAX_IMAGE_B64_LEN)
+    mime_type: str | None = None
+
+
+class VideoStatusRequest(BaseModel):
+    operation_id: str = Field(max_length=2000)
 
 
 def _client_key(request: Request) -> str:
@@ -593,3 +612,70 @@ def research_search(payload: GroundedSearchRequest, request: Request):
 
     log_request(client_key, endpoint, provider_name, "ok")
     return {"result": text, "chunks": chunks}
+
+
+@app.post("/api/video/generate")
+def video_generate(payload: VideoGenerateRequest, request: Request):
+    # Gemini (Veo)-only capability today, see AIProvider.generate_video docstring.
+    client_key = _client_key(request)
+    provider_name = os.getenv("AI_PROVIDER", "gemini")
+    endpoint = "/api/video/generate"
+
+    if not _video_limiter.allow(client_key):
+        log_request(client_key, endpoint, provider_name, "rate_limited")
+        return JSONResponse(status_code=429, content={"detail": "Too many video requests, slow down."})
+
+    aspect_ratio = payload.aspect_ratio if payload.aspect_ratio in ALLOWED_VIDEO_ASPECT_RATIOS else "16:9"
+
+    image_bytes = None
+    if payload.image_base64:
+        try:
+            image_bytes = _decode_image_b64(payload.image_base64, payload.mime_type or "")
+        except Exception:  # noqa: BLE001
+            return JSONResponse(status_code=400, content={"detail": "Invalid starting image data."})
+
+    if not os.getenv("AI_API_KEY"):
+        log_request(client_key, endpoint, provider_name, "mock_no_key")
+        return JSONResponse(status_code=503, content={"detail": "No AI provider configured."})
+
+    try:
+        provider = get_provider()
+        operation_id = provider.generate_video(payload.prompt, image_bytes, payload.mime_type, aspect_ratio)
+    except NotImplementedError:
+        log_request(client_key, endpoint, provider_name, "unsupported")
+        return JSONResponse(
+            status_code=501,
+            content={"detail": f"Video generation isn't supported by the '{provider_name}' provider yet."},
+        )
+    except AIProviderError as exc:
+        log_request(client_key, endpoint, provider_name, "provider_error", str(exc))
+        return JSONResponse(status_code=502, content={"detail": "Failed to start video generation. Please try again."})
+
+    log_request(client_key, endpoint, provider_name, "ok")
+    return {"operation_id": operation_id}
+
+
+@app.post("/api/video/status")
+def video_status(payload: VideoStatusRequest, request: Request):
+    client_key = _client_key(request)
+    provider_name = os.getenv("AI_PROVIDER", "gemini")
+    endpoint = "/api/video/status"
+
+    if not _video_status_limiter.allow(client_key):
+        log_request(client_key, endpoint, provider_name, "rate_limited")
+        return JSONResponse(status_code=429, content={"detail": "Polling too fast, slow down."})
+
+    try:
+        provider = get_provider()
+        done, video_bytes = provider.get_video_status(payload.operation_id)
+    except AIProviderError as exc:
+        log_request(client_key, endpoint, provider_name, "provider_error", str(exc))
+        return JSONResponse(status_code=502, content={"detail": "Failed to check video status."})
+
+    if not done:
+        return {"done": False}
+
+    log_request(client_key, endpoint, provider_name, "ok")
+    if video_bytes is None:
+        return JSONResponse(status_code=502, content={"detail": "Video finished but no data was returned."})
+    return Response(content=video_bytes, media_type="video/mp4")

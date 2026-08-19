@@ -36,6 +36,19 @@ class AIProvider(ABC):
         capability today."""
         raise NotImplementedError(f"{type(self).__name__} does not support edit_image")
 
+    def generate_video(
+        self, prompt: str, image_bytes: bytes | None, image_mime: str | None, aspect_ratio: str
+    ) -> str:
+        """Start an async video generation job. Returns an opaque operation id to poll with
+        get_video_status. Gemini (Veo)-only capability today."""
+        raise NotImplementedError(f"{type(self).__name__} does not support generate_video")
+
+    def get_video_status(self, operation_id: str) -> tuple[bool, bytes | None]:
+        """Poll a video generation job. Returns (done, video_bytes). video_bytes is None until
+        done is True. The video is downloaded server-side, the API key never reaches the
+        browser via a signed URL. Gemini (Veo)-only capability today."""
+        raise NotImplementedError(f"{type(self).__name__} does not support get_video_status")
+
     def grounded_search(self, prompt: str, search_type: str, lat: float | None, lng: float | None) -> tuple[str, list[dict]]:
         """Answer a prompt using live web or maps grounding. Returns (text, source_chunks).
         Gemini-only capability today, no equivalent grounding tool on Claude/OpenAI's base APIs."""

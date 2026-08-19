@@ -1,63 +1,22 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-// Fix: Add .ts extension to module path
-import { generateVideo, getVideosOperation, analyzeVideo } from '../../services/geminiLabService.ts';
-import { GenerateVideosOperation } from '@google/genai';
 // Fix: Add .tsx extension to module path
 import { UploadIcon, SparklesIcon } from '../Icons.tsx';
 
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
+
 type VideoTool = 'generate' | 'analyze';
 
-// Polling interval for VEO operation status
+// Polling interval for the video generation job status
 const POLLING_INTERVAL = 10000; // 10 seconds
 
 const VideoStudio: React.FC = () => {
     const [activeTool, setActiveTool] = useState<VideoTool>('generate');
-    const [hasApiKey, setHasApiKey] = useState(false);
-    const [isCheckingKey, setIsCheckingKey] = useState(true);
-
-    useEffect(() => {
-        const checkKey = async () => {
-            if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
-                const keyStatus = await window.aistudio.hasSelectedApiKey();
-                setHasApiKey(keyStatus);
-            }
-            setIsCheckingKey(false);
-        };
-        checkKey();
-    }, []);
-    
-    const handleSelectKey = async () => {
-        if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
-            await window.aistudio.openSelectKey();
-            // Optimistically assume key selection was successful to avoid race conditions
-            setHasApiKey(true);
-        }
-    };
-    
-    if (isCheckingKey) {
-        return <div className="text-center p-8 animate-pulse">Checking API key status...</div>;
-    }
-
-    if (!hasApiKey) {
-        return (
-            <div className="text-center p-8 bg-yellow-900/50 border border-yellow-600 rounded-lg">
-                <h3 className="text-xl font-bold text-yellow-300">VEO API Key Required</h3>
-                <p className="my-4 text-yellow-200">Video generation with VEO requires you to select an API key. This service may incur costs.</p>
-                <p className="mb-4 text-sm text-yellow-300">Please review the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="underline hover:text-white">billing documentation</a> before proceeding.</p>
-                <button onClick={handleSelectKey} className="bg-yellow-500 text-gray-900 font-bold px-6 py-3 rounded-lg hover:bg-yellow-600">
-                    Select API Key
-                </button>
-            </div>
-        )
-    }
 
     const Generator = () => {
         const [prompt, setPrompt] = useState('');
-        // Fix: Changed state property from 'mime' to 'mimeType' to match the expected type for the geminiLabService.
         const [image, setImage] = useState<{ data: string, url: string, mimeType: string } | null>(null);
         const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('16:9');
-        const [operation, setOperation] = useState<GenerateVideosOperation | null>(null);
         const [videoUrl, setVideoUrl] = useState<string | null>(null);
         const [isLoading, setIsLoading] = useState(false);
         const [error, setError] = useState('');
@@ -71,36 +30,33 @@ const VideoStudio: React.FC = () => {
             };
         }, []);
 
-        const pollOperation = (op: GenerateVideosOperation) => {
+        const pollOperation = (operationId: string) => {
             pollIntervalRef.current = window.setInterval(async () => {
                 try {
-                    const updatedOp = await getVideosOperation(op);
-                    setOperation(updatedOp);
-                    if (updatedOp.done) {
+                    const response = await fetch(`${API_BASE}/api/video/status`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ operation_id: operationId }),
+                    });
+                    if (!response.ok) {
+                        const body = await response.json().catch(() => ({}));
+                        throw new Error(body.detail || `Backend returned ${response.status}`);
+                    }
+                    const contentType = response.headers.get('content-type') || '';
+                    if (contentType.includes('application/json')) {
+                        const data = await response.json();
+                        if (data.done === false) return; // still generating, keep polling
+                    } else {
+                        // Video finished: response body is the raw video bytes.
                         clearInterval(pollIntervalRef.current!);
                         pollIntervalRef.current = null;
-                        const uri = updatedOp.response?.generatedVideos?.[0]?.video?.uri;
-                        if (uri) {
-                            const response = await fetch(`${uri}&key=${process.env.API_KEY}`);
-                            if (!response.ok) {
-                                const errorJson = await response.json().catch(() => ({ message: `Failed to download video. Status: ${response.status}` }));
-                                throw errorJson;
-                            }
-                            const blob = await response.blob();
-                            setVideoUrl(URL.createObjectURL(blob));
-                        } else {
-                            setError('Video generation finished, but no video URI was found.');
-                        }
+                        const blob = await response.blob();
+                        setVideoUrl(URL.createObjectURL(blob));
                         setIsLoading(false);
                     }
                 } catch (err: any) {
                     console.error('Polling error:', err);
-                    if (JSON.stringify(err).includes("Requested entity was not found")) {
-                        setError("API Key not found. Please re-select your key.");
-                        setHasApiKey(false); // Reset key state to force re-selection
-                    } else {
-                        setError('An error occurred while checking video status.');
-                    }
+                    setError(err.message || 'An error occurred while checking video status.');
                     setIsLoading(false);
                     clearInterval(pollIntervalRef.current!);
                     pollIntervalRef.current = null;
@@ -113,21 +69,26 @@ const VideoStudio: React.FC = () => {
             setIsLoading(true);
             setError('');
             setVideoUrl(null);
-            setOperation(null);
-            
+
             try {
-                const initialOp = await generateVideo(prompt, image ?? undefined, aspectRatio);
-                setOperation(initialOp);
-                if (!initialOp.done) {
-                    pollOperation(initialOp);
+                const response = await fetch(`${API_BASE}/api/video/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt,
+                        aspect_ratio: aspectRatio,
+                        image_base64: image?.data,
+                        mime_type: image?.mimeType,
+                    }),
+                });
+                if (!response.ok) {
+                    const body = await response.json().catch(() => ({}));
+                    throw new Error(body.detail || `Backend returned ${response.status}`);
                 }
+                const data = await response.json();
+                pollOperation(data.operation_id);
             } catch (err: any) {
-                if (JSON.stringify(err).includes("Requested entity was not found")) {
-                    setError("API Key not found. Please re-select your key.");
-                    setHasApiKey(false); // Reset key state to force re-selection
-                } else {
-                    setError('Failed to start video generation. Please try again.');
-                }
+                setError(err.message || 'Failed to start video generation. Please try again.');
                 console.error(err);
                 setIsLoading(false);
             }

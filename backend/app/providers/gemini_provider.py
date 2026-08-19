@@ -12,6 +12,7 @@ class GeminiProvider(AIProvider):
             raise RuntimeError("AI_API_KEY is required when AI_PROVIDER=gemini")
         from google import genai
 
+        self._api_key = api_key
         self._client = genai.Client(api_key=api_key)
         self._model = os.getenv("AI_MODEL", "gemini-3.6-flash")
 
@@ -125,6 +126,52 @@ class GeminiProvider(AIProvider):
             return response.text or ""
         except Exception as exc:  # noqa: BLE001
             raise AIProviderError(f"Gemini analyze_image failed: {exc}") from exc
+
+    def generate_video(self, prompt: str, image_bytes: bytes | None, image_mime: str | None, aspect_ratio: str) -> str:
+        try:
+            kwargs: dict = {
+                "model": "veo-3.1-fast-generate-preview",
+                "prompt": prompt,
+                "config": {"number_of_videos": 1, "resolution": "720p", "aspect_ratio": aspect_ratio},
+            }
+            if image_bytes and image_mime:
+                import base64
+
+                kwargs["image"] = {
+                    "image_bytes": base64.b64encode(image_bytes).decode(),
+                    "mime_type": image_mime,
+                }
+            operation = self._client.models.generate_videos(**kwargs)
+            if not operation.name:
+                raise AIProviderError("Video operation was started but returned no tracking id.")
+            return operation.name
+        except AIProviderError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise AIProviderError(f"Gemini generate_video failed: {exc}") from exc
+
+    def get_video_status(self, operation_id: str) -> tuple[bool, bytes | None]:
+        try:
+            operation = self._client.operations.get(name=operation_id)
+            if not operation.done:
+                return False, None
+
+            generated = getattr(operation.response, "generated_videos", None) if operation.response else None
+            uri = generated[0].video.uri if generated else None
+            if not uri:
+                raise AIProviderError("Video generation finished, but no video URI was found.")
+
+            # Fetch the video ourselves so the signed URL + API key never goes to the browser.
+            import urllib.request
+
+            sep = "&" if "?" in uri else "?"
+            req = urllib.request.Request(f"{uri}{sep}key={self._api_key}")
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return True, resp.read()
+        except AIProviderError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise AIProviderError(f"Gemini get_video_status failed: {exc}") from exc
 
     def grounded_search(self, prompt: str, search_type: str, lat: float | None, lng: float | None):
         try:
