@@ -22,7 +22,7 @@ interface Tab {
     searchResults?: SearchResult[];
 }
 
-type SearchMode = 'web' | 'pyai' | 'image' | 'video' | 'forum' | 'maps' | 'market' | 'ext' | 'settings';
+type SearchMode = 'web' | 'pyai' | 'aisearch' | 'image' | 'video' | 'forum' | 'maps' | 'market' | 'ext' | 'settings';
 
 interface PysrchBrowserProps {
     initialUrl?: string | null;
@@ -196,6 +196,7 @@ const PysrchBrowser: React.FC<PysrchBrowserProps> = ({ initialUrl }) => {
 
     const renderContent = (tab: Tab) => {
         if (tab.mode === 'pyai') return <PyAIView />;
+        if (tab.mode === 'aisearch') return <AISearchView />;
         if (tab.loading) return <div className="flex flex-col items-center justify-center h-full bg-white/5"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mb-4"></div><p className="text-gray-500 font-mono text-sm">Loading...</p></div>;
         if (tab.error) return <div className="flex flex-col items-center justify-center h-full text-gray-400"><ShieldCheckIcon className="w-16 h-16 mb-4 text-red-500" /><p>{tab.error}</p></div>;
         if (tab.searchResults) return <SearchResultsView results={tab.searchResults} mode={tab.mode} query={tab.url} />;
@@ -287,6 +288,7 @@ const PysrchBrowser: React.FC<PysrchBrowserProps> = ({ initialUrl }) => {
             <div className={`flex gap-4 px-4 py-2 text-xs font-semibold border-b overflow-x-auto scrollbar-hide ${incognito ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-white border-slate-100 text-slate-600'}`}>
                 <ModeButton mode="web" label="Web" icon={<GlobeAltIcon className="w-3 h-3" />} active={activeTab.mode === 'web'} onClick={handleSearchMode} />
                 <ModeButton mode="pyai" label="PyAI" icon={<SparklesIcon className="w-3 h-3" />} active={activeTab.mode === 'pyai'} onClick={handleSearchMode} />
+                <ModeButton mode="aisearch" label="AI Search" icon={<CpuChipIcon className="w-3 h-3" />} active={activeTab.mode === 'aisearch'} onClick={handleSearchMode} />
                 <ModeButton mode="image" label="Image" icon={<PhotoIcon className="w-3 h-3" />} active={activeTab.mode === 'image'} onClick={handleSearchMode} />
                 <ModeButton mode="video" label="Video" icon={<VideoCameraIcon className="w-3 h-3" />} active={activeTab.mode === 'video'} onClick={handleSearchMode} />
                 <ModeButton mode="forum" label="Forums" icon={<UserGroupIcon className="w-3 h-3" />} active={activeTab.mode === 'forum'} onClick={handleSearchMode} />
@@ -375,6 +377,132 @@ const PyAIView = () => {
                 <div className="text-center"><SparklesIcon className="w-12 h-12 text-purple-600 mx-auto mb-4" /><h2 className="text-2xl font-bold text-slate-800">PyAI Search Mode</h2></div>
                 <form onSubmit={handleAsk} className="relative"><input type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Ask anything..." className="w-full p-4 pr-12 rounded-xl border border-slate-300 shadow-sm focus:outline-none focus:border-purple-500" /><button type="submit" className="absolute right-3 top-1/2 -translate-y-1/2 text-purple-600">{loading ? <ArrowPathIcon className="w-5 h-5 animate-spin" /> : <ArrowRightIcon className="w-5 h-5" />}</button></form>
                 {response && <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm prose max-w-none"><p className="whitespace-pre-wrap text-slate-700">{response}</p></div>}
+            </div>
+        </div>
+    );
+};
+
+interface SearchSource { url: string; title: string; score: number; }
+
+const AISearchView = () => {
+    const [indexUrl, setIndexUrl] = useState('');
+    const [indexStatus, setIndexStatus] = useState('');
+    const [isIndexing, setIsIndexing] = useState(false);
+    const [query, setQuery] = useState('');
+    const [answer, setAnswer] = useState('');
+    const [sources, setSources] = useState<SearchSource[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [stats, setStats] = useState<{ chunks: number, urls: number } | null>(null);
+
+    const refreshStats = async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api/search/stats`);
+            if (res.ok) setStats(await res.json());
+        } catch { /* stats are a nice-to-have, ignore failures */ }
+    };
+
+    useEffect(() => { refreshStats(); }, []);
+
+    const handleIndex = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!indexUrl.trim()) return;
+        setIsIndexing(true);
+        setIndexStatus('');
+        try {
+            const res = await fetch(`${API_BASE}/api/search/index`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: indexUrl.trim() }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `Backend returned ${res.status}`);
+            setIndexStatus(`Indexed "${data.title}", ${data.chunks_indexed} chunks.`);
+            setIndexUrl('');
+            refreshStats();
+        } catch (err: any) {
+            setIndexStatus(err.message || 'Failed to index that URL.');
+        } finally {
+            setIsIndexing(false);
+        }
+    };
+
+    const handleSearch = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!query.trim()) return;
+        setIsSearching(true);
+        setAnswer('');
+        setSources([]);
+        try {
+            const res = await fetch(`${API_BASE}/api/search/query`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `Backend returned ${res.status}`);
+            setAnswer(data.answer || '');
+            setSources(data.sources || []);
+        } catch (err: any) {
+            setAnswer(err.message || 'Search failed.');
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
+    return (
+        <div className="h-full bg-slate-50 p-8 overflow-y-auto">
+            <div className="max-w-2xl w-full mx-auto space-y-6">
+                <div className="text-center">
+                    <CpuChipIcon className="w-12 h-12 text-purple-600 mx-auto mb-2" />
+                    <h2 className="text-2xl font-bold text-slate-800">AI Search</h2>
+                    <p className="text-sm text-slate-500 mt-1">Real crawling, real embeddings, real semantic search, a self-hosted vector index over pages you index.</p>
+                    {stats && <p className="text-xs text-slate-400 mt-1">{stats.chunks} chunks indexed across {stats.urls} page{stats.urls === 1 ? '' : 's'}</p>}
+                </div>
+
+                <form onSubmit={handleIndex} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Index a page</label>
+                    <div className="relative">
+                        <input
+                            type="text" value={indexUrl} onChange={(e) => setIndexUrl(e.target.value)}
+                            placeholder="https://example.com/article"
+                            className="w-full p-3 pr-12 rounded-lg border border-slate-300 focus:outline-none focus:border-purple-500 text-sm"
+                        />
+                        <button type="submit" disabled={isIndexing} className="absolute right-2 top-1/2 -translate-y-1/2 text-purple-600">
+                            {isIndexing ? <ArrowPathIcon className="w-5 h-5 animate-spin" /> : <PlusIcon className="w-5 h-5" />}
+                        </button>
+                    </div>
+                    {indexStatus && <p className="text-xs text-slate-500">{indexStatus}</p>}
+                </form>
+
+                <form onSubmit={handleSearch} className="relative">
+                    <input
+                        type="text" value={query} onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Ask a question about what you've indexed..."
+                        className="w-full p-4 pr-12 rounded-xl border border-slate-300 shadow-sm focus:outline-none focus:border-purple-500"
+                    />
+                    <button type="submit" disabled={isSearching} className="absolute right-3 top-1/2 -translate-y-1/2 text-purple-600">
+                        {isSearching ? <ArrowPathIcon className="w-5 h-5 animate-spin" /> : <MagnifyingGlassIcon className="w-5 h-5" />}
+                    </button>
+                </form>
+
+                {answer && (
+                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm prose max-w-none">
+                        <p className="whitespace-pre-wrap text-slate-700">{answer}</p>
+                        {sources.length > 0 && (
+                            <div className="mt-4 pt-4 border-t border-slate-100">
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Sources</p>
+                                <ul className="space-y-1">
+                                    {sources.map((s, i) => (
+                                        <li key={i} className="text-xs">
+                                            <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-purple-600 hover:underline">{s.title || s.url}</a>
+                                            <span className="text-slate-400 ml-2">match {(s.score * 100).toFixed(0)}%</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
         </div>
     );

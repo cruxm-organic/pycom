@@ -201,3 +201,13 @@ class GeminiProvider(AIProvider):
             return response.text or "", chunks
         except Exception as exc:  # noqa: BLE001
             raise AIProviderError(f"Gemini grounded_search failed: {exc}") from exc
+
+    def embed_text(self, texts: list[str]) -> list[list[float]]:
+        try:
+            response = self._client.models.embed_content(
+                model="gemini-embedding-001",
+                contents=texts,
+            )
+            return [e.values for e in response.embeddings]
+        except Exception as exc:  # noqa: BLE001
+            raise AIProviderError(f"Gemini embed_text failed: {exc}") from exc

@@ -49,6 +49,12 @@ class AIProvider(ABC):
         browser via a signed URL. Gemini (Veo)-only capability today."""
         raise NotImplementedError(f"{type(self).__name__} does not support get_video_status")
 
+    def embed_text(self, texts: list[str]) -> list[list[float]]:
+        """Return one embedding vector per input text, in order. Every provider supports
+        text embeddings via some model, so this is provider-agnostic in principle, but only
+        implemented for the currently configured provider to start."""
+        raise NotImplementedError(f"{type(self).__name__} does not support embed_text")
+
     def grounded_search(self, prompt: str, search_type: str, lat: float | None, lng: float | None) -> tuple[str, list[dict]]:
         """Answer a prompt using live web or maps grounding. Returns (text, source_chunks).
         Gemini-only capability today, no equivalent grounding tool on Claude/OpenAI's base APIs."""
