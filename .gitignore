@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.local
+backend/.env
+backend/audit.log
+backend/__pycache__/
+backend/app/**/__pycache__/
+backend/venv/
+backend/.venv/

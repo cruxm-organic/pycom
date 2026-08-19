@@ -1,0 +1,9 @@
+{
+  "name": "PyCom",
+  "description": "PyCom: An AI-powered gamified learning platform by Jeyabal Anthony to master Python through interactive games, career paths, and a cutting-edge AI Lab.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera",
+    "geolocation"
+  ]
+}
