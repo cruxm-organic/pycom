@@ -50,3 +50,31 @@ class ClaudeProvider(AIProvider):
             return response.content[0].text if response.content else ""
         except Exception as exc:  # noqa: BLE001
             raise AIProviderError(f"Claude chat failed: {exc}") from exc
+
+    def analyze_image(self, image_bytes: bytes, mime_type: str, question: str) -> str:
+        import base64
+
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=1024,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": mime_type,
+                                    "data": base64.b64encode(image_bytes).decode(),
+                                },
+                            },
+                            {"type": "text", "text": question or "Describe this image in detail."},
+                        ],
+                    }
+                ],
+            )
+            return response.content[0].text if response.content else ""
+        except Exception as exc:  # noqa: BLE001
+            raise AIProviderError(f"Claude analyze_image failed: {exc}") from exc

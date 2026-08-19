@@ -1,10 +1,10 @@
 
 import React, { useState } from 'react';
 // Fix: Add .ts extension to module path
-import { groundedSearch, complexReasoning } from '../../services/geminiLabService.ts';
-// Fix: Add .ts extension to module path
 import type { GroundingChunk } from '../../types.ts';
 import { DownloadIcon } from '../Icons.tsx';
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
 
 type ResearchTool = 'deep-dive' | 'web-search' | 'map-search';
 
@@ -27,24 +27,48 @@ const Researcher: React.FC = () => {
         setChunks([]);
 
         try {
-            switch(activeTool) {
-                case 'deep-dive':
-                    const reasoningResult = await complexReasoning(prompt);
-                    setResult(reasoningResult);
-                    break;
-                case 'web-search':
-                    const webResult = await groundedSearch(prompt, 'web');
-                    setResult(webResult.text);
-                    setChunks(webResult.chunks);
-                    break;
-                case 'map-search':
-                    const mapResult = await groundedSearch(prompt, 'maps');
-                    setResult(mapResult.text);
-                    setChunks(mapResult.chunks);
-                    break;
+            if (activeTool === 'deep-dive') {
+                const response = await fetch(`${API_BASE}/api/research/deep-dive`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt }),
+                });
+                if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+                const data = await response.json();
+                setResult(data.result || data.text || '');
+            } else {
+                let lat: number | undefined;
+                let lng: number | undefined;
+                if (activeTool === 'map-search') {
+                    try {
+                        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+                            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+                        });
+                        lat = position.coords.latitude;
+                        lng = position.coords.longitude;
+                    } catch (geoErr) {
+                        console.warn('Could not get user location for Maps search:', geoErr);
+                    }
+                }
+                const response = await fetch(`${API_BASE}/api/research/search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt,
+                        search_type: activeTool === 'web-search' ? 'web' : 'maps',
+                        lat, lng,
+                    }),
+                });
+                if (!response.ok) {
+                    const body = await response.json().catch(() => ({}));
+                    throw new Error(body.detail || `Backend returned ${response.status}`);
+                }
+                const data = await response.json();
+                setResult(data.result || '');
+                setChunks(data.chunks || []);
             }
-        } catch (err) {
-            setError('An error occurred during the search. Please try again.');
+        } catch (err: any) {
+            setError(err.message || 'An error occurred during the search. Please try again.');
             console.error(err);
         } finally {
             setIsLoading(false);

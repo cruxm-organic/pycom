@@ -45,3 +45,24 @@ class OpenAIProvider(AIProvider):
             return response.choices[0].message.content or ""
         except Exception as exc:  # noqa: BLE001
             raise AIProviderError(f"OpenAI chat failed: {exc}") from exc
+
+    def analyze_image(self, image_bytes: bytes, mime_type: str, question: str) -> str:
+        import base64
+
+        try:
+            b64_image = base64.b64encode(image_bytes).decode()
+            response = self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": question or "Describe this image in detail."},
+                            {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_image}"}},
+                        ],
+                    }
+                ],
+            )
+            return response.choices[0].message.content or ""
+        except Exception as exc:  # noqa: BLE001
+            raise AIProviderError(f"OpenAI analyze_image failed: {exc}") from exc

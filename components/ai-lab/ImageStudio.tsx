@@ -1,9 +1,27 @@
 
 import React, { useState } from 'react';
-// Fix: Add .ts extension to module path
-import { generateImage, editImage, analyzeImage } from '../../services/geminiLabService.ts';
 // Fix: Add .tsx extension to module path
 import { UploadIcon, SparklesIcon } from '../Icons.tsx';
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
+
+async function blobToDataUrl(blob: globalThis.Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
+async function fetchImageOrThrow(response: Response): Promise<string> {
+    if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || `Backend returned ${response.status}`);
+    }
+    const blob = await response.blob();
+    return blobToDataUrl(blob);
+}
 
 type ImageTool = 'generate' | 'edit' | 'analyze';
 
@@ -29,10 +47,14 @@ const ImageStudio: React.FC = () => {
             setError('');
             setImage(null);
             try {
-                const base64Image = await generateImage(prompt, aspectRatio);
-                setImage(`data:image/jpeg;base64,${base64Image}`);
-            } catch (err) {
-                setError('Failed to generate image. Please try again.');
+                const response = await fetch(`${API_BASE}/api/image/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt, aspect_ratio: aspectRatio }),
+                });
+                setImage(await fetchImageOrThrow(response));
+            } catch (err: any) {
+                setError(err.message || 'Failed to generate image. Please try again.');
                 console.error(err);
             } finally {
                 setIsLoading(false);
@@ -89,10 +111,14 @@ const ImageStudio: React.FC = () => {
             setError('');
             setEditedImage(null);
             try {
-                const base64Image = await editImage(prompt, originalImage.data, originalImage.mime);
-                setEditedImage(`data:image/png;base64,${base64Image}`);
-            } catch (err) {
-                setError('Failed to edit image. Please try again.');
+                const response = await fetch(`${API_BASE}/api/image/edit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt, image_base64: originalImage.data, mime_type: originalImage.mime }),
+                });
+                setEditedImage(await fetchImageOrThrow(response));
+            } catch (err: any) {
+                setError(err.message || 'Failed to edit image. Please try again.');
                 console.error(err);
             } finally {
                 setIsLoading(false);
@@ -161,10 +187,19 @@ const ImageStudio: React.FC = () => {
             setError('');
             setAnalysis('');
             try {
-                const result = await analyzeImage(image.data, image.mime);
-                setAnalysis(result);
-            } catch (err) {
-                setError('Failed to analyze image. Please try again.');
+                const response = await fetch(`${API_BASE}/api/image/analyze`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image_base64: image.data, mime_type: image.mime }),
+                });
+                if (!response.ok) {
+                    const body = await response.json().catch(() => ({}));
+                    throw new Error(body.detail || `Backend returned ${response.status}`);
+                }
+                const data = await response.json();
+                setAnalysis(data.text || '');
+            } catch (err: any) {
+                setError(err.message || 'Failed to analyze image. Please try again.');
                 console.error(err);
             } finally {
                 setIsLoading(false);

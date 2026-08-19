@@ -64,3 +64,93 @@ class GeminiProvider(AIProvider):
             return base64.b64decode(b64_audio)
         except Exception as exc:  # noqa: BLE001
             raise AIProviderError(f"Gemini text_to_speech failed: {exc}") from exc
+
+    def generate_image(self, prompt: str, aspect_ratio: str) -> bytes:
+        import base64
+
+        try:
+            response = self._client.models.generate_images(
+                model="imagen-4.0-generate-001",
+                prompt=prompt,
+                config={
+                    "number_of_images": 1,
+                    "output_mime_type": "image/jpeg",
+                    "aspect_ratio": aspect_ratio,
+                },
+            )
+            image_bytes = response.generated_images[0].image.image_bytes
+            # SDK may return raw bytes or a base64 str depending on version; normalize.
+            if isinstance(image_bytes, str):
+                return base64.b64decode(image_bytes)
+            return image_bytes
+        except Exception as exc:  # noqa: BLE001
+            raise AIProviderError(f"Gemini generate_image failed: {exc}") from exc
+
+    def edit_image(self, prompt: str, image_bytes: bytes, mime_type: str) -> bytes:
+        import base64
+
+        try:
+            response = self._client.models.generate_content(
+                model="gemini-2.5-flash-image",
+                contents={
+                    "parts": [
+                        {"inline_data": {"data": base64.b64encode(image_bytes).decode(), "mime_type": mime_type}},
+                        {"text": prompt},
+                    ]
+                },
+                config={"response_modalities": ["IMAGE"]},
+            )
+            for part in response.candidates[0].content.parts:
+                if part.inline_data:
+                    return base64.b64decode(part.inline_data.data)
+            raise AIProviderError("No image was returned from the edit operation.")
+        except AIProviderError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise AIProviderError(f"Gemini edit_image failed: {exc}") from exc
+
+    def analyze_image(self, image_bytes: bytes, mime_type: str, question: str) -> str:
+        import base64
+
+        try:
+            response = self._client.models.generate_content(
+                model=self._model,
+                contents={
+                    "parts": [
+                        {"inline_data": {"data": base64.b64encode(image_bytes).decode(), "mime_type": mime_type}},
+                        {"text": question or "Describe this image in detail."},
+                    ]
+                },
+            )
+            return response.text or ""
+        except Exception as exc:  # noqa: BLE001
+            raise AIProviderError(f"Gemini analyze_image failed: {exc}") from exc
+
+    def grounded_search(self, prompt: str, search_type: str, lat: float | None, lng: float | None):
+        try:
+            config: dict = {
+                "tools": [{"google_search": {}}] if search_type == "web" else [{"google_maps": {}}]
+            }
+            if search_type == "maps" and lat is not None and lng is not None:
+                config["tool_config"] = {
+                    "retrieval_config": {"lat_lng": {"latitude": lat, "longitude": lng}}
+                }
+
+            response = self._client.models.generate_content(
+                model=self._model,
+                contents=prompt,
+                config=config,
+            )
+            chunks_raw = getattr(response.candidates[0], "grounding_metadata", None)
+            chunks_raw = getattr(chunks_raw, "grounding_chunks", None) or []
+            chunks = []
+            for c in chunks_raw:
+                web = getattr(c, "web", None)
+                maps = getattr(c, "maps", None)
+                chunks.append({
+                    "web": {"uri": web.uri, "title": web.title} if web else None,
+                    "maps": {"uri": maps.uri, "title": maps.title} if maps else None,
+                })
+            return response.text or "", chunks
+        except Exception as exc:  # noqa: BLE001
+            raise AIProviderError(f"Gemini grounded_search failed: {exc}") from exc

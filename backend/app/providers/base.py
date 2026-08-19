@@ -27,6 +27,27 @@ class AIProvider(ABC):
         than a silent no-op."""
         raise NotImplementedError(f"{type(self).__name__} does not support text_to_speech")
 
+    def generate_image(self, prompt: str, aspect_ratio: str) -> bytes:
+        """Generate a JPEG image from a text prompt. Gemini-only capability today."""
+        raise NotImplementedError(f"{type(self).__name__} does not support generate_image")
+
+    def edit_image(self, prompt: str, image_bytes: bytes, mime_type: str) -> bytes:
+        """Edit an existing image per a text instruction, returns PNG bytes. Gemini-only
+        capability today."""
+        raise NotImplementedError(f"{type(self).__name__} does not support edit_image")
+
+    def grounded_search(self, prompt: str, search_type: str, lat: float | None, lng: float | None) -> tuple[str, list[dict]]:
+        """Answer a prompt using live web or maps grounding. Returns (text, source_chunks).
+        Gemini-only capability today, no equivalent grounding tool on Claude/OpenAI's base APIs."""
+        raise NotImplementedError(f"{type(self).__name__} does not support grounded_search")
+
+    @abstractmethod
+    def analyze_image(self, image_bytes: bytes, mime_type: str, question: str) -> str:
+        """Describe/answer a question about an image. Supported across providers with vision
+        input (Gemini, Claude, OpenAI all qualify), so every provider must implement this one,
+        unlike the Gemini-only capabilities above."""
+        raise NotImplementedError
+
 
 class AIProviderError(Exception):
     """Raised when a provider fails to produce a valid structured response."""
