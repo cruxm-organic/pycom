@@ -1,11 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI, Chat } from '@google/genai';
 // Fix: Add .tsx extension to module path
 import { SparklesIcon } from '../Icons.tsx';
 
-if (!process.env.API_KEY) {
-  console.warn("API_KEY environment variable not set for Chatbot. Chatbot will not work.");
-}
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
 
 interface Message {
   role: 'user' | 'model';
@@ -13,23 +10,12 @@ interface Message {
 }
 
 const Chatbot: React.FC = () => {
-    const [chat, setChat] = useState<Chat | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
     const [userInput, setUserInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        if (process.env.API_KEY) {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const newChat = ai.chats.create({
-                model: 'gemini-2.5-flash',
-                config: {
-                    systemInstruction: "You are Py, a helpful and friendly Python programming expert from PyCom. You assist users with their Python questions in a clear and concise way. You can provide code examples.",
-                },
-            });
-            setChat(newChat);
-        }
         setMessages([{ role: 'model', text: 'Hello! I am Py, your personal Python assistant. How can I help you today?' }]);
     }, []);
 
@@ -39,7 +25,7 @@ const Chatbot: React.FC = () => {
 
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!userInput.trim() || isLoading || !chat) return;
+        if (!userInput.trim() || isLoading) return;
 
         const userMessage: Message = { role: 'user', text: userInput };
         setMessages(prev => [...prev, userMessage]);
@@ -48,19 +34,21 @@ const Chatbot: React.FC = () => {
         setIsLoading(true);
 
         try {
-            const responseStream = await chat.sendMessageStream({ message: currentInput });
-            
-            let modelResponse = '';
-            setMessages(prev => [...prev, { role: 'model', text: '' }]);
+            const history = messages.concat([{ role: 'user', text: currentInput }]);
+            const response = await fetch(`${API_BASE}/api/py-tutor-chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ history }),
+            });
 
-            for await (const chunk of responseStream) {
-                modelResponse += chunk.text;
-                setMessages(prev => {
-                    const newMessages = [...prev];
-                    newMessages[newMessages.length - 1] = { role: 'model', text: modelResponse };
-                    return newMessages;
-                });
+            if (response.status === 429) {
+                setMessages(prev => [...prev, { role: 'model', text: 'Getting a lot of questions, give me a moment and try again.' }]);
+                return;
             }
+            if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+
+            const data = await response.json();
+            setMessages(prev => [...prev, { role: 'model', text: data.text || '' }]);
         } catch (error) {
             console.error("Error sending message:", error);
             setMessages(prev => [...prev, { role: 'model', text: 'Sorry, I encountered an error. Please try again.' }]);
@@ -96,9 +84,9 @@ const Chatbot: React.FC = () => {
                         onChange={(e) => setUserInput(e.target.value)}
                         placeholder="Ask me anything about Python..."
                         className="flex-1 bg-gray-700 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-purple-500 text-white"
-                        disabled={isLoading || !process.env.API_KEY}
+                        disabled={isLoading}
                     />
-                    <button type="submit" disabled={isLoading || !userInput.trim() || !process.env.API_KEY} className="bg-purple-600 text-white font-bold p-3 rounded-lg hover:bg-purple-700 disabled:bg-gray-500">
+                    <button type="submit" disabled={isLoading || !userInput.trim()} className="bg-purple-600 text-white font-bold p-3 rounded-lg hover:bg-purple-700 disabled:bg-gray-500">
                         Send
                     </button>
                 </form>

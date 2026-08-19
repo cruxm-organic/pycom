@@ -1,24 +1,14 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { GoogleGenAI } from '@google/genai';
 import { SparklesIcon, PlayIcon, XMarkIcon, CodeBracketIcon, SpeakerWaveIcon } from '../Icons.tsx';
-import { generateSpeech } from '../../services/geminiLabService.ts';
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
 
 interface ClassroomViewProps {
     courseTitle: string;
 }
 
 // --- Audio Helper Functions (reused) ---
-function decode(base64: string): Uint8Array {
-  const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-}
-
 async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: number, numChannels: number): Promise<AudioBuffer> {
   const dataInt16 = new Int16Array(data.buffer);
   const frameCount = dataInt16.length / numChannels;
@@ -44,37 +34,16 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ courseTitle }) => {
     // Initialize the AI Professor
     useEffect(() => {
         const startClass = async () => {
-            if (!process.env.API_KEY) {
-                setLessonHistory([{ type: 'chalk', content: 'Error: API Key missing. The Professor cannot enter the room. Please ensure your environment is configured correctly.' }]);
-                setIsInitializing(false);
-                return;
-            }
-
             setIsLoading(true);
             try {
-                const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-                
-                const response = await ai.models.generateContent({
-                    model: 'gemini-2.5-flash',
-                    contents: "Start the first lesson. Introduce yourself and the topic, then draw a diagram on the blackboard explaining the first concept.",
-                    config: {
-                        systemInstruction: `You are Professor Py, a friendly, encouraging, and highly visual computer science teacher. 
-                        You are teaching the course: "${courseTitle}".
-                        
-                        STYLE GUIDELINES:
-                        1. You are writing on a BLACKBOARD. Use markdown heavily.
-                        2. Use ASCII art or diagrams where possible to explain concepts visually.
-                        3. Keep explanations concise but interesting.
-                        4. Always end your turn by asking the student to write specific code in their notebook to practice the concept.
-                        5. Do not give the full answer code, let the student try.`
-                    }
+                const response = await fetch(`${API_BASE}/api/classroom-start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ course_title: courseTitle }),
                 });
-                
-                if (response.text) {
-                    setLessonHistory(prev => [...prev, { type: 'chalk', content: response.text! }]);
-                } else {
-                    throw new Error("No content generated");
-                }
+                if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+                const data = await response.json();
+                setLessonHistory(prev => [...prev, { type: 'chalk', content: data.text || 'No content generated.' }]);
             } catch (error: any) {
                 console.error("Classroom Init Error:", error);
                 setLessonHistory(prev => [...prev, { type: 'chalk', content: `Connection to the Professor failed. ${error.message || "Please check your internet."}` }]);
@@ -95,37 +64,28 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ courseTitle }) => {
     }, [lessonHistory]);
 
     const handleRunCode = async () => {
-        if (!userCode.trim() || !process.env.API_KEY) return;
+        if (!userCode.trim()) return;
 
         setIsLoading(true);
-        
+
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            
-            // Context construction
             const lastLesson = lessonHistory.filter(l => l.type === 'chalk').pop()?.content || "";
-            
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: [
-                    { role: 'model', parts: [{ text: lastLesson }] },
-                    { role: 'user', parts: [{ text: `Here is my code:\n\`\`\`python\n${userCode}\n\`\`\`` }] }
-                ],
-                config: {
-                    systemInstruction: `You are simulating a Python terminal/interpreter AND a teacher.
-                    INPUT: The student's code.
-                    
-                    YOUR TASK:
-                    1. Analyze the code.
-                    2. OUTPUT 1 (The Log): Simulate exactly what this code would output in a terminal. If there is an error, simulate the Python traceback.
-                    3. OUTPUT 2 (The Teacher): After the log, step back to the blackboard (start a new paragraph starting with "Teacher:") and comment on their result. If correct, praise them and move to the next concept/lesson. If incorrect, give a hint.`
-                }
+            const response = await fetch(`${API_BASE}/api/classroom-run-code`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    course_title: courseTitle,
+                    last_lesson: lastLesson,
+                    student_code: userCode,
+                }),
             });
+            if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+            const data = await response.json();
 
             setLessonHistory(prev => [
-                ...prev, 
+                ...prev,
                 { type: 'code', content: userCode },
-                { type: 'log', content: response.text || "Error: No response." }
+                { type: 'log', content: data.text || "Error: No response." }
             ]);
 
         } catch (error: any) {
@@ -139,9 +99,17 @@ const ClassroomView: React.FC<ClassroomViewProps> = ({ courseTitle }) => {
         if (isPlayingAudio) return;
         setIsPlayingAudio(true);
         try {
-            const base64Audio = await generateSpeech(text.substring(0, 500)); // Limit length for demo
-            const audioBytes = decode(base64Audio);
-            
+            const response = await fetch(`${API_BASE}/api/text-to-speech`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text.substring(0, 500) }), // Limit length for demo
+            });
+            if (!response.ok) {
+                const body = await response.json().catch(() => ({}));
+                throw new Error(body.detail || `Backend returned ${response.status}`);
+            }
+            const audioBytes = new Uint8Array(await response.arrayBuffer());
+
             if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
                 audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
             }

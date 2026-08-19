@@ -1,7 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI, Chat } from '@google/genai';
 import { PaperAirplaneIcon, UserCircleIcon, SparklesIcon } from '../Icons.tsx';
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
 
 interface LMSChatProps {
     courseTitle: string;
@@ -10,25 +11,11 @@ interface LMSChatProps {
 const LMSChat: React.FC<LMSChatProps> = ({ courseTitle }) => {
     const [messages, setMessages] = useState<{ role: 'user' | 'model', text: string }[]>([]);
     const [input, setInput] = useState('');
-    const [chat, setChat] = useState<Chat | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        if (process.env.API_KEY) {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const newChat = ai.chats.create({
-                model: 'gemini-2.5-flash',
-                config: {
-                    systemInstruction: `You are a teaching assistant for the course "${courseTitle}". 
-                    Answer student questions clearly and concisely. You can provide examples but keep them brief.`
-                }
-            });
-            setChat(newChat);
-            setMessages([{ role: 'model', text: `Hello! I'm your TA for ${courseTitle}. What questions do you have about the course material?` }]);
-        } else {
-            setMessages([{ role: 'model', text: "Error: API Key missing. Chat unavailable." }]);
-        }
+        setMessages([{ role: 'model', text: `Hello! I'm your TA for ${courseTitle}. What questions do you have about the course material?` }]);
     }, [courseTitle]);
 
     useEffect(() => {
@@ -37,7 +24,7 @@ const LMSChat: React.FC<LMSChatProps> = ({ courseTitle }) => {
 
     const handleSend = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!input.trim() || !chat || isLoading) return;
+        if (!input.trim() || isLoading) return;
 
         const userMsg = input;
         setInput('');
@@ -45,8 +32,21 @@ const LMSChat: React.FC<LMSChatProps> = ({ courseTitle }) => {
         setIsLoading(true);
 
         try {
-            const result = await chat.sendMessage({ message: userMsg });
-            setMessages(prev => [...prev, { role: 'model', text: result.text || "I didn't catch that." }]);
+            const history = messages.concat([{ role: 'user', text: userMsg }]);
+            const response = await fetch(`${API_BASE}/api/lms-chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ history, course_title: courseTitle }),
+            });
+
+            if (response.status === 429) {
+                setMessages(prev => [...prev, { role: 'model', text: "Lots of questions right now, try again shortly." }]);
+                return;
+            }
+            if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+
+            const data = await response.json();
+            setMessages(prev => [...prev, { role: 'model', text: data.text || "I didn't catch that." }]);
         } catch (error) {
             setMessages(prev => [...prev, { role: 'model', text: "Sorry, I'm having trouble connecting right now." }]);
         } finally {

@@ -41,3 +41,26 @@ class GeminiProvider(AIProvider):
             return response.text or ""
         except Exception as exc:  # noqa: BLE001
             raise AIProviderError(f"Gemini chat failed: {exc}") from exc
+
+    def text_to_speech(self, text: str) -> bytes:
+        import base64
+
+        from google.genai import types
+
+        try:
+            response = self._client.models.generate_content(
+                model="gemini-2.5-flash-preview-tts",
+                contents=[{"parts": [{"text": text}]}],
+                config=types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=types.SpeechConfig(
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kore")
+                        )
+                    ),
+                ),
+            )
+            b64_audio = response.candidates[0].content.parts[0].inline_data.data
+            return base64.b64decode(b64_audio)
+        except Exception as exc:  # noqa: BLE001
+            raise AIProviderError(f"Gemini text_to_speech failed: {exc}") from exc

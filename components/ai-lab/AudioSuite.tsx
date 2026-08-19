@@ -5,10 +5,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 // Fix: Removed LiveSession as it's not an exported member of @google/genai.
 import { GoogleGenAI, LiveServerMessage, Modality, Blob as GenAIBlob } from '@google/genai';
-// Fix: Add .ts extension to module path
-import { generateSpeech } from '../../services/geminiLabService.ts';
 // Fix: Add .tsx extension to module path
 import { MicrophoneIcon, StopIcon, PlayIcon } from '../Icons.tsx';
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
 
 type AudioTool = 'live' | 'transcribe' | 'tts';
 
@@ -180,9 +180,17 @@ const AudioSuite: React.FC = () => {
         setIsLoading(true);
         setError('');
         try {
-            const base64Audio = await generateSpeech(text);
-            const audioBytes = decode(base64Audio);
-            
+            const response = await fetch(`${API_BASE}/api/text-to-speech`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text.substring(0, 500) }),
+            });
+            if (!response.ok) {
+                const body = await response.json().catch(() => ({}));
+                throw new Error(body.detail || `Backend returned ${response.status}`);
+            }
+            const audioBytes = new Uint8Array(await response.arrayBuffer());
+
             if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
                 audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
             }
@@ -194,8 +202,8 @@ const AudioSuite: React.FC = () => {
             source.connect(audioCtx.destination);
             source.start();
 
-        } catch (err) {
-            setError('Failed to generate speech.');
+        } catch (err: any) {
+            setError(err.message || 'Failed to generate speech.');
             console.error(err);
         } finally {
             setIsLoading(false);

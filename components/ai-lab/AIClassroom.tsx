@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { GoogleGenAI } from '@google/genai';
 import { SparklesIcon, PlayIcon, XMarkIcon, CodeBracketIcon } from '../Icons.tsx';
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
 
 interface AIClassroomProps {
     courseTitle: string;
@@ -18,36 +19,16 @@ const AIClassroom: React.FC<AIClassroomProps> = ({ courseTitle, onLeaveClass }) 
     // Initialize the AI Professor
     useEffect(() => {
         const startClass = async () => {
-            if (!process.env.API_KEY) {
-                setLessonHistory([{ type: 'chalk', content: 'Error: API Key missing. The Professor cannot enter the room.' }]);
-                return;
-            }
-
             setIsLoading(true);
             try {
-                const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-                
-                const response = await ai.models.generateContent({
-                    model: 'gemini-2.5-flash',
-                    contents: "Start the first lesson. Introduce yourself and the topic, then draw a diagram on the blackboard explaining the first concept.",
-                    config: {
-                        systemInstruction: `You are Professor Py, a friendly, encouraging, and highly visual computer science teacher. 
-                        You are teaching the course: "${courseTitle}".
-                        
-                        STYLE GUIDELINES:
-                        1. You are writing on a BLACKBOARD. Use markdown heavily.
-                        2. Use ASCII art or diagrams where possible to explain concepts visually.
-                        3. Keep explanations concise but interesting.
-                        4. Always end your turn by asking the student to write specific code in their notebook to practice the concept.
-                        5. Do not give the full answer code, let the student try.`
-                    }
+                const response = await fetch(`${API_BASE}/api/classroom-start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ course_title: courseTitle }),
                 });
-                
-                if (response.text) {
-                    setLessonHistory(prev => [...prev, { type: 'chalk', content: response.text! }]);
-                } else {
-                    throw new Error("No content generated");
-                }
+                if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+                const data = await response.json();
+                setLessonHistory(prev => [...prev, { type: 'chalk', content: data.text || 'No content generated.' }]);
             } catch (error) {
                 setLessonHistory(prev => [...prev, { type: 'chalk', content: "Connection to the Professor failed. Please check your internet." }]);
             } finally {
@@ -67,39 +48,28 @@ const AIClassroom: React.FC<AIClassroomProps> = ({ courseTitle, onLeaveClass }) 
     }, [lessonHistory]);
 
     const handleRunCode = async () => {
-        if (!userCode.trim() || !process.env.API_KEY) return;
+        if (!userCode.trim()) return;
 
         setIsLoading(true);
-        // Add user code to history for context (visually we separate it)
-        
+
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            
-            // Context construction (simplified for this demo)
             const lastLesson = lessonHistory.filter(l => l.type === 'chalk').pop()?.content || "";
-            
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: [
-                    { role: 'model', parts: [{ text: lastLesson }] },
-                    { role: 'user', parts: [{ text: `Here is my code:\n\`\`\`python\n${userCode}\n\`\`\`` }] }
-                ],
-                config: {
-                    systemInstruction: `You are simulating a Python terminal/interpreter AND a teacher.
-                    
-                    INPUT: The student's code.
-                    
-                    YOUR TASK:
-                    1. Analyze the code.
-                    2. OUTPUT 1 (The Log): Simulate exactly what this code would output in a terminal. If there is an error, simulate the Python traceback.
-                    3. OUTPUT 2 (The Teacher): After the log, step back to the blackboard (start a new paragraph) and comment on their result. If correct, praise them and move to the next concept/lesson. If incorrect, give a hint.`
-                }
+            const response = await fetch(`${API_BASE}/api/classroom-run-code`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    course_title: courseTitle,
+                    last_lesson: lastLesson,
+                    student_code: userCode,
+                }),
             });
+            if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+            const data = await response.json();
 
             setLessonHistory(prev => [
-                ...prev, 
+                ...prev,
                 { type: 'code', content: userCode },
-                { type: 'log', content: response.text || "Execution failed." } 
+                { type: 'log', content: data.text || "Execution failed." }
             ]);
 
         } catch (error) {
