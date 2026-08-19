@@ -308,6 +308,15 @@ class PyAIChatRequest(BaseModel):
     query: str = Field(max_length=MAX_RESEARCH_PROMPT_LEN)
 
 
+import re as _re
+
+_DOMAIN_PATTERN = _re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$")
+
+# Cheap insurance against using this endpoint as a free port-scanning/SSRF relay: only
+# ever contact rdap.org, and only forward something that already looks like a domain.
+_domain_check_limiter = RateLimiter(max_requests=15, window_seconds=60)
+
+
 def _client_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
@@ -730,6 +739,42 @@ def video_status(payload: VideoStatusRequest, request: Request):
 @app.websocket("/ws/live-chat")
 async def live_chat(ws: WebSocket):
     await handle_live_chat(ws)
+
+
+@app.get("/api/domains/check")
+def domains_check(domain: str, request: Request):
+    """Real domain availability check via RDAP (Registration Data Access Protocol), a free,
+    standardized registry lookup, no registrar account or API key needed. This only tells you
+    whether a domain is registered, it does not register, reserve, or purchase anything."""
+    client_key = _client_key(request)
+    endpoint = "/api/domains/check"
+
+    if not _domain_check_limiter.allow(client_key):
+        log_request(client_key, endpoint, "rdap", "rate_limited")
+        return JSONResponse(status_code=429, content={"detail": "Too many domain checks, slow down."})
+
+    domain = domain.strip().lower()
+    if len(domain) > 253 or not _DOMAIN_PATTERN.match(domain):
+        return JSONResponse(status_code=400, content={"detail": "Invalid domain name."})
+
+    import urllib.error
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(
+            f"https://rdap.org/domain/{domain}", headers={"Accept": "application/rdap+json"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            status = resp.status
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+    except Exception as exc:  # noqa: BLE001
+        log_request(client_key, endpoint, "rdap", "error", str(exc))
+        return JSONResponse(status_code=502, content={"detail": "Could not reach the domain registry."})
+
+    available = status == 404
+    log_request(client_key, endpoint, "rdap", "ok", f"status={status}")
+    return {"domain": domain, "available": available}
 
 
 @app.post("/api/browser/render-page")

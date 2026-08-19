@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { GlobeAltIcon, MagnifyingGlassIcon, CheckCircleIcon, PlusIcon, TrashIcon, ServerIcon, LockClosedIcon, ShieldCheckIcon, ArrowPathIcon, KeyIcon } from '../Icons.tsx';
+import WindowFrame, { WindowMode } from '../workspace/WindowFrame.tsx';
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
 
 interface DNSRecord {
     id: string;
@@ -70,19 +73,32 @@ const DomainManager: React.FC = () => {
     
     const [selectedDomain, setSelectedDomain] = useState<Domain | null>(myDomains[0]);
     const [newRecordType, setNewRecordType] = useState<DNSRecord['type']>('A');
+    const [windowMode, setWindowMode] = useState<WindowMode>('normal');
+    const [searchError, setSearchError] = useState('');
 
-    const handleSearch = (e: React.FormEvent) => {
+    const handleSearch = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!searchQuery.trim()) return;
         setIsSearching(true);
-        setTimeout(() => {
+        setSearchError('');
+        setSearchResult(null);
+        const domain = searchQuery.includes('.') ? searchQuery.trim() : `${searchQuery.trim()}.com`;
+        try {
+            const response = await fetch(`${API_BASE}/api/domains/check?domain=${encodeURIComponent(domain)}`);
+            if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+            const data = await response.json();
             setSearchResult({
-                domain: searchQuery.includes('.') ? searchQuery : `${searchQuery}.pycom`,
-                available: true, // Always make domains available for demo
-                price: '$0.00 (PyCom Free Tier)'
+                domain: data.domain,
+                available: data.available,
+                // Real availability, illustrative pricing, no live registrar/payment integration yet.
+                price: data.available ? 'Pricing available at checkout (registrar not yet connected)' : '',
             });
+        } catch (err) {
+            console.error('Domain check failed:', err);
+            setSearchError('Could not reach the domain registry right now. Please try again.');
+        } finally {
             setIsSearching(false);
-        }, 1000);
+        }
     };
 
     const handleBuy = () => {
@@ -154,13 +170,23 @@ const DomainManager: React.FC = () => {
     };
 
     return (
-        <div className="h-full flex flex-col bg-slate-950 rounded-xl overflow-hidden border border-slate-800">
+        <WindowFrame
+            title="Domain & DNS Manager"
+            icon={<GlobeAltIcon className="w-4 h-4 text-blue-400" />}
+            mode={windowMode}
+            onModeChange={setWindowMode}
+        >
+        <div className="h-full flex flex-col bg-slate-950 overflow-hidden">
             <div className="bg-slate-900 p-6 border-b border-slate-800">
                 <h2 className="text-2xl font-bold text-white flex items-center gap-3">
                     <GlobeAltIcon className="w-8 h-8 text-blue-500" />
                     Domain & DNS Manager
                 </h2>
                 <p className="text-slate-400 text-sm mt-1">Register domains and manage DNS zones for your PyCom Cloud services.</p>
+                <p className="text-amber-400/80 text-xs mt-2 flex items-center gap-1.5">
+                    <ShieldCheckIcon className="w-3.5 h-3.5 shrink-0" />
+                    Availability checks are real (live RDAP registry lookups). No registrar or payment provider is connected yet, so registering a domain here is a demo action only.
+                </p>
             </div>
 
             <div className="flex flex-grow overflow-hidden">
@@ -178,8 +204,9 @@ const DomainManager: React.FC = () => {
                             <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                         </form>
                         
-                        {isSearching && <div className="text-center text-xs text-slate-500 mt-2 animate-pulse">Checking registry...</div>}
-                        
+                        {isSearching && <div className="text-center text-xs text-slate-500 mt-2 animate-pulse">Checking real domain registry (RDAP)...</div>}
+                        {searchError && <div className="text-center text-xs text-red-400 mt-2">{searchError}</div>}
+
                         {searchResult && (
                             <div className="mt-3 p-3 bg-slate-800 rounded-lg border border-slate-700">
                                 <p className="text-white font-bold text-sm">{searchResult.domain}</p>
@@ -188,7 +215,7 @@ const DomainManager: React.FC = () => {
                                         <>
                                             <span className="text-green-400 text-xs font-bold">Available</span>
                                             <span className="text-slate-300 text-xs">{searchResult.price}</span>
-                                            <button onClick={handleBuy} className="bg-blue-600 text-white text-xs px-2 py-1 rounded font-bold hover:bg-blue-700">Get it</button>
+                                            <button onClick={handleBuy} className="bg-blue-600 text-white text-xs px-2 py-1 rounded font-bold hover:bg-blue-700" title="No registrar is connected yet, this adds the domain to your PyCom dashboard for demo purposes only, it does not register or purchase anything.">Add (Demo)</button>
                                         </>
                                     ) : (
                                         <span className="text-red-400 text-xs font-bold">Taken</span>
@@ -363,6 +390,7 @@ const DomainManager: React.FC = () => {
                 </div>
             </div>
         </div>
+        </WindowFrame>
     );
 };
 

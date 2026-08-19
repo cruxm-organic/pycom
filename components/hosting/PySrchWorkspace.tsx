@@ -10,6 +10,7 @@ import {
     ArchiveBoxIcon, StarIcon
 } from '../Icons.tsx';
 import PyProd from './PyProd.tsx';
+import WindowFrame, { WindowMode } from '../workspace/WindowFrame.tsx';
 
 type AppType = 'pyword' | 'pytab' | 'pyslides' | 'pydrive' | 'pymail' | 'pycal' | 'pyhuddle' | 'pyprod' | null;
 
@@ -452,57 +453,111 @@ const PyHuddleApp = () => (
     </div>
 );
 
+const renderAppById = (id: AppType) => {
+    switch (id) {
+        case 'pyword': return <PyWordApp />;
+        case 'pytab': return <PyTabApp />;
+        case 'pyslides': return <PySlidesApp />;
+        case 'pyprod': return <PyProd />;
+        case 'pydrive': return <PyDriveApp />;
+        case 'pymail': return <PyMailApp />;
+        case 'pycal': return <PyCalApp />;
+        case 'pyhuddle': return <PyHuddleApp />;
+        default: return null;
+    }
+};
+
 const PySrchWorkspace: React.FC = () => {
     const [activeApp, setActiveApp] = useState<AppType>(null);
+    const [splitApp, setSplitApp] = useState<AppType>(null);
+    const [windowMode, setWindowMode] = useState<WindowMode>('normal');
 
-    const renderApp = () => {
-        switch(activeApp) {
-            case 'pyword': return <PyWordApp />;
-            case 'pytab': return <PyTabApp />;
-            case 'pyslides': return <PySlidesApp />;
-            case 'pyprod': return <PyProd />;
-            case 'pydrive': return <PyDriveApp />;
-            case 'pymail': return <PyMailApp />;
-            case 'pycal': return <PyCalApp />;
-            case 'pyhuddle': return <PyHuddleApp />;
-            default: return null;
+    const toggleSplit = () => {
+        if (splitApp) {
+            setSplitApp(null);
+            return;
         }
+        const other = APPS.find(a => a.id !== activeApp);
+        if (other) setSplitApp(other.id as AppType);
     };
 
-    if (activeApp) {
-        return (
+    let body: React.ReactNode;
+
+    if (activeApp && splitApp) {
+        body = (
+            <div className="h-full grid grid-cols-2 divide-x divide-slate-800">
+                <div className="h-full flex flex-col relative overflow-hidden">
+                    <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wide bg-slate-800 text-slate-400 flex items-center justify-between">
+                        <span>{APPS.find(a => a.id === activeApp)?.name}</span>
+                        <button onClick={() => setActiveApp(null)} className="hover:text-white" title="Close"><XMarkIcon className="w-3 h-3" /></button>
+                    </div>
+                    <div className="flex-grow overflow-hidden">{renderAppById(activeApp)}</div>
+                </div>
+                <div className="h-full flex flex-col relative overflow-hidden">
+                    <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wide bg-slate-800 text-slate-400 flex items-center justify-between">
+                        <select
+                            value={splitApp}
+                            onChange={(e) => setSplitApp(e.target.value as AppType)}
+                            className="bg-transparent text-slate-300 text-[10px] border border-slate-600 rounded px-1"
+                        >
+                            {APPS.filter(a => a.id !== activeApp).map(a => (
+                                <option key={a.id} value={a.id}>{a.name}</option>
+                            ))}
+                        </select>
+                        <button onClick={() => setSplitApp(null)} className="hover:text-white" title="Close split"><XMarkIcon className="w-3 h-3" /></button>
+                    </div>
+                    <div className="flex-grow overflow-hidden">{renderAppById(splitApp)}</div>
+                </div>
+            </div>
+        );
+    } else if (activeApp) {
+        body = (
             <div className="h-full flex flex-col relative">
-                <button 
+                <button
                     onClick={() => setActiveApp(null)}
                     className="absolute top-2 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-4 py-1 rounded-full text-xs font-bold shadow-xl z-50 hover:bg-slate-700 transition-colors border border-slate-600 flex items-center gap-2"
                     title="Close Application"
                 >
                     <XMarkIcon className="w-3 h-3" /> Close App
                 </button>
-                {renderApp()}
+                {renderAppById(activeApp)}
             </div>
-        )
+        );
+    } else {
+        body = (
+            <div className="h-full flex flex-col items-center justify-center bg-slate-900 p-8 overflow-y-auto">
+                <h2 className="text-2xl font-bold text-white mb-8 text-center">PySrch Workspace</h2>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+                    {APPS.map(app => (
+                        <button
+                            key={app.id}
+                            onClick={() => setActiveApp(app.id as AppType)}
+                            className="flex flex-col items-center gap-4 p-6 rounded-2xl bg-slate-800 border border-slate-700 hover:bg-slate-700 hover:scale-105 transition-all group w-40 h-40 justify-center shadow-lg"
+                            title={`Launch ${app.name} - ${app.desc}`}
+                        >
+                            <div className="transform group-hover:scale-110 transition-transform duration-300">
+                                {app.icon}
+                            </div>
+                            <span className="font-bold text-white text-sm">{app.name}</span>
+                        </button>
+                    ))}
+                </div>
+            </div>
+        );
     }
 
     return (
-        <div className="h-full flex flex-col items-center justify-center bg-slate-900 p-8 overflow-y-auto">
-            <h2 className="text-2xl font-bold text-white mb-8 text-center">PySrch Workspace</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-                {APPS.map(app => (
-                    <button 
-                        key={app.id}
-                        onClick={() => setActiveApp(app.id as AppType)}
-                        className="flex flex-col items-center gap-4 p-6 rounded-2xl bg-slate-800 border border-slate-700 hover:bg-slate-700 hover:scale-105 transition-all group w-40 h-40 justify-center shadow-lg"
-                        title={`Launch ${app.name} - ${app.desc}`}
-                    >
-                        <div className="transform group-hover:scale-110 transition-transform duration-300">
-                            {app.icon}
-                        </div>
-                        <span className="font-bold text-white text-sm">{app.name}</span>
-                    </button>
-                ))}
-            </div>
-        </div>
+        <WindowFrame
+            title="PySrch Workspace"
+            icon={<DocumentIcon className="w-4 h-4 text-indigo-400" />}
+            mode={windowMode}
+            onModeChange={setWindowMode}
+            canSplit={!!activeApp}
+            splitActive={!!splitApp}
+            onToggleSplit={toggleSplit}
+        >
+            {body}
+        </WindowFrame>
     );
 }
 

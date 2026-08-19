@@ -6,6 +6,7 @@ import {
     EyeSlashIcon, PhotoIcon, VideoCameraIcon, UserGroupIcon, MapIcon, ShoppingBagIcon, PuzzlePieceIcon, CogIcon, ServerIcon, TerminalIcon, CheckCircleIcon, CpuChipIcon, CubeIcon, MapPinIcon, HandThumbUpIcon, ChatBubbleLeftRightIcon, WifiIcon, MegaphoneIcon, SpeakerWaveIcon
 } from '../Icons.tsx';
 import type { SearchResult } from '../../types.ts';
+import WindowFrame, { WindowMode } from '../workspace/WindowFrame.tsx';
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
 
@@ -34,8 +35,27 @@ const PysrchBrowser: React.FC<PysrchBrowserProps> = ({ initialUrl }) => {
     const [incognito, setIncognito] = useState(false);
     const [urlInput, setUrlInput] = useState('techcrunch.com');
     const [isWifiConnected, setIsWifiConnected] = useState(true);
+    const [windowMode, setWindowMode] = useState<WindowMode>('normal');
+    const [splitViewTabId, setSplitViewTabId] = useState<number | null>(null);
 
     const activeTab = tabs.find(t => t.active) || tabs[0];
+    const splitTab = splitViewTabId != null ? tabs.find(t => t.id === splitViewTabId) : null;
+
+    const toggleSplitView = () => {
+        if (splitViewTabId != null) {
+            setSplitViewTabId(null);
+            return;
+        }
+        const other = tabs.find(t => t.id !== activeTab.id);
+        if (other) {
+            setSplitViewTabId(other.id);
+        } else {
+            // No second tab yet, open one so split view has something to show.
+            const newId = Date.now();
+            setTabs(prev => prev.concat({ id: newId, url: '', title: 'New Tab', active: false, loading: false, mode: 'web' }));
+            setSplitViewTabId(newId);
+        }
+    };
 
     // Handle deep linking from external components (e.g., VPS web admin)
     useEffect(() => {
@@ -215,7 +235,16 @@ const PysrchBrowser: React.FC<PysrchBrowserProps> = ({ initialUrl }) => {
     };
 
     return (
-        <div className={`h-full flex flex-col rounded-xl overflow-hidden border shadow-2xl transition-colors duration-500 ${incognito ? 'bg-slate-900 border-purple-900' : 'bg-slate-100 border-slate-300'}`}>
+        <WindowFrame
+            title="Pysrch Browser"
+            icon={<GlobeAltIcon className="w-4 h-4 text-purple-400" />}
+            mode={windowMode}
+            onModeChange={setWindowMode}
+            canSplit
+            splitActive={splitViewTabId != null}
+            onToggleSplit={toggleSplitView}
+        >
+        <div className={`h-full flex flex-col overflow-hidden transition-colors duration-500 ${incognito ? 'bg-slate-900' : 'bg-slate-100'}`}>
             <div className={`flex items-center px-2 pt-2 gap-1 ${incognito ? 'bg-black' : 'bg-slate-200'}`}>
                 {tabs.map(tab => (
                     <div key={tab.id} onClick={() => switchTab(tab.id)} className={`group relative flex items-center gap-2 px-3 py-2 rounded-t-lg text-xs font-medium cursor-pointer transition-colors max-w-[150px] ${tab.active ? (incognito ? 'bg-slate-800 text-white' : 'bg-white text-slate-800') : (incognito ? 'bg-transparent text-slate-500 hover:bg-slate-900' : 'bg-transparent text-slate-500 hover:bg-slate-300')}`}>
@@ -268,9 +297,34 @@ const PysrchBrowser: React.FC<PysrchBrowserProps> = ({ initialUrl }) => {
             </div>
 
             <div className="flex-grow relative overflow-hidden">
-                {renderContent(activeTab)}
+                {splitTab ? (
+                    <div className="h-full grid grid-cols-2 divide-x divide-slate-300">
+                        <div className="h-full overflow-hidden flex flex-col">
+                            <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wide bg-slate-200 text-slate-500 truncate">{activeTab.title || 'New Tab'}</div>
+                            <div className="flex-grow overflow-hidden">{renderContent(activeTab)}</div>
+                        </div>
+                        <div className="h-full overflow-hidden flex flex-col">
+                            <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wide bg-slate-200 text-slate-500 truncate flex items-center justify-between">
+                                <span className="truncate">{splitTab.title || 'New Tab'}</span>
+                                <select
+                                    value={splitTab.id}
+                                    onChange={(e) => setSplitViewTabId(Number(e.target.value))}
+                                    className="ml-2 text-[10px] bg-transparent border border-slate-400 rounded px-1"
+                                >
+                                    {tabs.filter(t => t.id !== activeTab.id).map(t => (
+                                        <option key={t.id} value={t.id}>{t.title || 'New Tab'}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="flex-grow overflow-hidden">{renderContent(splitTab)}</div>
+                        </div>
+                    </div>
+                ) : (
+                    renderContent(activeTab)
+                )}
             </div>
         </div>
+        </WindowFrame>
     );
 };
 
