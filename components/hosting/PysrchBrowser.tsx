@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { GoogleGenAI } from '@google/genai';
-import { 
+import {
     GlobeAltIcon, ArrowLeftIcon, ArrowRightIcon, ArrowPathIcon, 
     LockClosedIcon, MagnifyingGlassIcon, SparklesIcon, TableCellsIcon,
     DocumentTextIcon, ShieldCheckIcon, NewspaperIcon, PlusIcon, XMarkIcon,
     EyeSlashIcon, PhotoIcon, VideoCameraIcon, UserGroupIcon, MapIcon, ShoppingBagIcon, PuzzlePieceIcon, CogIcon, ServerIcon, TerminalIcon, CheckCircleIcon, CpuChipIcon, CubeIcon, MapPinIcon, HandThumbUpIcon, ChatBubbleLeftRightIcon, WifiIcon, MegaphoneIcon, SpeakerWaveIcon
 } from '../Icons.tsx';
 import type { SearchResult } from '../../types.ts';
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
 
 interface Tab {
     id: number;
@@ -133,22 +134,14 @@ const PysrchBrowser: React.FC<PysrchBrowserProps> = ({ initialUrl }) => {
         }
 
         try {
-            if (process.env.API_KEY) {
-                const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-                const result = await ai.models.generateContent({
-                    model: 'gemini-2.5-flash',
-                    contents: `Render homepage for: ${formattedUrl}`,
-                    config: {
-                        responseMimeType: "application/json",
-                        systemInstruction: `You are a web browser engine. Return ONLY a valid JSON object: { "siteName": "String", "heroHeadline": "String", "heroSubtext": "String", "heroImageKeyword": "String", "articles": [{ "title": "String", "summary": "String", "category": "String", "date": "String" }] }`
-                    }
-                });
-                const text = result.text || "";
-                const data = JSON.parse(text);
-                updateTab(tabId, { loading: false, data, title: data.siteName });
-            } else {
-                throw new Error("API Key Missing");
-            }
+            const response = await fetch(`${API_BASE}/api/browser/render-page`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: formattedUrl }),
+            });
+            if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+            const data = await response.json();
+            updateTab(tabId, { loading: false, data, title: data.siteName });
         } catch (err: any) {
              setTimeout(() => {
                  const data = {
@@ -311,13 +304,14 @@ const PyAIView = () => {
         if (!query.trim()) return;
         setLoading(true);
         try {
-            if (process.env.API_KEY) {
-                const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-                const result = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: query });
-                setResponse(result.text || "No response.");
-            } else {
-                setResponse("API Key not available.");
-            }
+            const response = await fetch(`${API_BASE}/api/browser/pyai-chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query }),
+            });
+            if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+            const data = await response.json();
+            setResponse(data.text || "No response.");
         } catch (e) { setResponse("Error connecting to PyAI."); } finally { setLoading(false); }
     };
 

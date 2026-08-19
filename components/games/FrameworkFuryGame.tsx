@@ -1,7 +1,6 @@
 
 
-import React, { useState, useEffect } from 'react';
-import { InformationCircleIcon } from '../Icons.tsx';
+import React, { useState } from 'react';
 
 const TASKS = [
     {
@@ -41,14 +40,6 @@ const FrameworkFuryGame: React.FC<FrameworkFuryGameProps> = ({ onComplete }) => 
     const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
     const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
     const [gameOver, setGameOver] = useState(false);
-    const [apiKeyMissing, setApiKeyMissing] = useState(false);
-    
-    useEffect(() => {
-        if (!process.env.API_KEY) {
-            console.warn("API_KEY environment variable not set for the application. Some features may not work.");
-            setApiKeyMissing(true);
-        }
-    }, []);
 
     const currentTask = TASKS[currentTaskIndex];
 
@@ -99,15 +90,6 @@ const FrameworkFuryGame: React.FC<FrameworkFuryGameProps> = ({ onComplete }) => 
 
     return (
         <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-             {apiKeyMissing && (
-                <div className="bg-yellow-900/50 border border-yellow-700 text-yellow-200 text-sm rounded-lg p-4 mb-6 flex items-start gap-3" role="alert">
-                    <InformationCircleIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                    <div>
-                        <p className="font-bold">API Key Missing or Invalid</p>
-                        <p>While this game works offline, please ensure your API key is set up correctly to use all AI-powered features across PyCom.</p>
-                    </div>
-                </div>
-            )}
             <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-bold text-yellow-400">Score: {score}</h3>
                 <p className="text-purple-400 font-semibold">Task {currentTaskIndex + 1} / {TASKS.length}</p>
