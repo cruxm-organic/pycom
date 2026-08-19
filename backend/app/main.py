@@ -4,12 +4,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from .audit import log_request
+from .live_relay import handle_live_chat
 from .providers.base import AIProviderError
 from .providers.factory import get_provider
 from .security import RateLimiter, validate_dilemma
@@ -679,3 +680,8 @@ def video_status(payload: VideoStatusRequest, request: Request):
     if video_bytes is None:
         return JSONResponse(status_code=502, content={"detail": "Video finished but no data was returned."})
     return Response(content=video_bytes, media_type="video/mp4")
+
+
+@app.websocket("/ws/live-chat")
+async def live_chat(ws: WebSocket):
+    await handle_live_chat(ws)

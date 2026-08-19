@@ -3,8 +3,6 @@
 
 
 import React, { useState, useRef, useEffect } from 'react';
-// Fix: Removed LiveSession as it's not an exported member of @google/genai.
-import { GoogleGenAI, LiveServerMessage, Modality, Blob as GenAIBlob } from '@google/genai';
 // Fix: Add .tsx extension to module path
 import { MicrophoneIcon, StopIcon, PlayIcon } from '../Icons.tsx';
 
@@ -52,81 +50,107 @@ const AudioSuite: React.FC = () => {
   const LiveChat = () => {
     const [isSessionActive, setIsSessionActive] = useState(false);
     const [status, setStatus] = useState('Idle. Press Start to talk.');
-    // Fix: Replaced nonexistent type 'LiveSession' with 'any' for the session promise ref.
-    const sessionPromiseRef = useRef<Promise<any> | null>(null);
+    const wsRef = useRef<WebSocket | null>(null);
+    const streamRef = useRef<MediaStream | null>(null);
+    const inputAudioContextRef = useRef<AudioContext | null>(null);
     const outputAudioContextRef = useRef<AudioContext | null>(null);
     const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
     const nextStartTimeRef = useRef(0);
 
+    const cleanup = () => {
+      wsRef.current?.close();
+      wsRef.current = null;
+      streamRef.current?.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+      inputAudioContextRef.current?.close();
+      inputAudioContextRef.current = null;
+      sourcesRef.current.forEach(source => source.stop());
+      sourcesRef.current.clear();
+      outputAudioContextRef.current?.close();
+      outputAudioContextRef.current = null;
+      nextStartTimeRef.current = 0;
+      setIsSessionActive(false);
+    };
+
     const startSession = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = stream;
         setIsSessionActive(true);
-        setStatus('Connecting to Live API...');
+        setStatus('Connecting...');
 
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
         outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
         const outputNode = outputAudioContextRef.current.createGain();
         outputNode.connect(outputAudioContextRef.current.destination);
 
-        sessionPromiseRef.current = ai.live.connect({
-          model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-          callbacks: {
-            onopen: () => {
-              setStatus('Connection open. You can start talking now.');
-              const inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-              const source = inputAudioContext.createMediaStreamSource(stream);
-              const scriptProcessor = inputAudioContext.createScriptProcessor(4096, 1, 1);
-              scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
-                const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
-                const l = inputData.length;
-                const int16 = new Int16Array(l);
-                for (let i = 0; i < l; i++) {
-                    int16[i] = inputData[i] * 32768;
-                }
-                const pcmBlob: GenAIBlob = { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
-                sessionPromiseRef.current?.then((session) => session.sendRealtimeInput({ media: pcmBlob }));
-              };
-              source.connect(scriptProcessor);
-              scriptProcessor.connect(inputAudioContext.destination);
-            },
-            onmessage: async (message: LiveServerMessage) => {
-                const base64EncodedAudioString = message.serverContent?.modelTurn?.parts[0]?.inlineData.data;
-                if (base64EncodedAudioString && outputAudioContextRef.current) {
-                    const ctx = outputAudioContextRef.current;
-                    nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
-                    const audioBuffer = await decodeAudioData(decode(base64EncodedAudioString), ctx, 24000, 1);
-                    const source = ctx.createBufferSource();
-                    source.buffer = audioBuffer;
-                    source.connect(outputNode);
-                    source.addEventListener('ended', () => sourcesRef.current.delete(source));
-                    source.start(nextStartTimeRef.current);
-                    nextStartTimeRef.current += audioBuffer.duration;
-                    sourcesRef.current.add(source);
-                }
-                 if (message.serverContent?.interrupted) {
-                    for (const source of sourcesRef.current.values()) {
-                        source.stop();
-                        sourcesRef.current.delete(source);
-                    }
-                    nextStartTimeRef.current = 0;
-                }
-            },
-            onerror: (e: ErrorEvent) => {
-                console.error('Live API Error:', e);
-                setStatus('An error occurred. Session closed.');
-                setIsSessionActive(false);
-            },
-            onclose: (e: CloseEvent) => {
-                setStatus('Session closed.');
-                setIsSessionActive(false);
-            },
-          },
-          config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
-          },
-        });
+        const wsProtocol = API_BASE.startsWith('https') ? 'wss' : 'ws';
+        const wsUrl = API_BASE.replace(/^https?/, wsProtocol) + '/ws/live-chat';
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          setStatus('Connection open. You can start talking now.');
+          const inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+          inputAudioContextRef.current = inputAudioContext;
+          const source = inputAudioContext.createMediaStreamSource(stream);
+          const scriptProcessor = inputAudioContext.createScriptProcessor(4096, 1, 1);
+          scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
+            if (ws.readyState !== WebSocket.OPEN) return;
+            const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
+            const l = inputData.length;
+            const int16 = new Int16Array(l);
+            for (let i = 0; i < l; i++) {
+                int16[i] = inputData[i] * 32768;
+            }
+            ws.send(JSON.stringify({
+              type: 'audio',
+              data: encode(new Uint8Array(int16.buffer)),
+              mimeType: 'audio/pcm;rate=16000',
+            }));
+          };
+          source.connect(scriptProcessor);
+          scriptProcessor.connect(inputAudioContext.destination);
+        };
+
+        ws.onmessage = async (event) => {
+          const message = JSON.parse(event.data);
+          if (message.type === 'ready') return;
+          if (message.type === 'error') {
+            console.error('Live relay error:', message.message);
+            setStatus(message.message || 'An error occurred.');
+            cleanup();
+            return;
+          }
+          if (message.type === 'audio' && outputAudioContextRef.current) {
+            const ctx = outputAudioContextRef.current;
+            nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
+            const audioBuffer = await decodeAudioData(decode(message.data), ctx, 24000, 1);
+            const source = ctx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(outputNode);
+            source.addEventListener('ended', () => sourcesRef.current.delete(source));
+            source.start(nextStartTimeRef.current);
+            nextStartTimeRef.current += audioBuffer.duration;
+            sourcesRef.current.add(source);
+          }
+          if (message.type === 'interrupted') {
+            for (const source of sourcesRef.current.values()) {
+              source.stop();
+              sourcesRef.current.delete(source);
+            }
+            nextStartTimeRef.current = 0;
+          }
+        };
+
+        ws.onerror = () => {
+          setStatus('Connection error. Session closed.');
+          cleanup();
+        };
+
+        ws.onclose = () => {
+          setStatus('Session closed.');
+          cleanup();
+        };
       } catch (err) {
         console.error('Failed to get mic access:', err);
         setStatus('Microphone access denied.');
@@ -135,14 +159,12 @@ const AudioSuite: React.FC = () => {
     };
 
     const stopSession = () => {
-        sessionPromiseRef.current?.then((session) => session.close());
-        sessionPromiseRef.current = null;
-        sourcesRef.current.forEach(source => source.stop());
-        sourcesRef.current.clear();
-        outputAudioContextRef.current?.close();
-        setIsSessionActive(false);
-        setStatus('Idle. Press Start to talk.');
+      wsRef.current?.send(JSON.stringify({ type: 'close' }));
+      cleanup();
+      setStatus('Idle. Press Start to talk.');
     };
+
+    useEffect(() => () => cleanup(), []);
 
     return (
       <div className="text-center space-y-4">
