@@ -16,7 +16,8 @@ import OrgChart from './OrgChart.tsx';
 import ModelTuner from './ModelTuner.tsx';
 import CollaborativeCanvas from './CollaborativeCanvas.tsx';
 import AdminDashboard from './AdminDashboard.tsx';
-import { GoogleGenAI, Chat } from '@google/genai';
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000';
 
 interface AgentWorkstationProps {
     agent: Agent;
@@ -27,28 +28,13 @@ type View = 'dashboard' | 'mcp' | 'autopilot' | 'knowledge' | 'settings' | 'bigd
 
 // Inner Chat Interface for the Dashboard View
 const DashboardChat: React.FC<{ agent: Agent, logs: string[] }> = ({ agent, logs }) => {
-    const [chat, setChat] = useState<Chat | null>(null);
     const [messages, setMessages] = useState<{role: 'user' | 'model', text: string}[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const endRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        if (process.env.API_KEY) {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const newChat = ai.chats.create({
-                model: 'gemini-2.5-flash',
-                config: {
-                    systemInstruction: `You are the AI Assistant for ${agent.name}. 
-                    You have access to the system logs. 
-                    When a workflow starts or finishes, acknowledge it enthusiastically.`
-                }
-            });
-            setChat(newChat);
-            setMessages([{ role: 'model', text: `System Online. I am ready to assist you, ${agent.name}.` }]);
-        } else {
-            setMessages([{ role: 'model', text: `System Online (Offline Mode). I am ready to assist you, ${agent.name}.` }]);
-        }
+        setMessages([{ role: 'model', text: `System Online. I am ready to assist you, ${agent.name}.` }]);
     }, [agent]);
 
     // React to system logs
@@ -73,15 +59,21 @@ const DashboardChat: React.FC<{ agent: Agent, logs: string[] }> = ({ agent, logs
         setIsLoading(true);
 
         try {
-            if (chat) {
-                const res = await chat.sendMessage({ message: userText });
-                setMessages(prev => [...prev, { role: 'model', text: res.text || '' }]);
-            } else {
-                // Offline Fallback
-                setTimeout(() => {
-                    setMessages(prev => [...prev, { role: 'model', text: "I am operating in offline mode. I can see your request but cannot access the LLM for a dynamic response. Please check your API configuration." }]);
-                }, 500);
+            const history = messages.concat([{ role: 'user', text: userText }]);
+            const response = await fetch(`${API_BASE}/api/workstation-chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ history, agent_name: agent.name, agent_role: agent.role }),
+            });
+
+            if (response.status === 429) {
+                setMessages(prev => [...prev, { role: 'model', text: "Getting a lot of requests, one moment." }]);
+                return;
             }
+            if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+
+            const data = await response.json();
+            setMessages(prev => [...prev, { role: 'model', text: data.text || '' }]);
         } catch (e) {
             setMessages(prev => [...prev, { role: 'model', text: "Connection error." }]);
         } finally {
